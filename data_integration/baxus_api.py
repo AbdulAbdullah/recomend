@@ -12,7 +12,6 @@ class BaxusAPI:
     
     def __init__(self):
         self.base_url = settings.BAXUS_API_BASE_URL
-        self.api_key = settings.BAXUS_API_KEY
         
     def get_user_bar(self, username: str) -> Dict[str, Any]:
         """
@@ -24,17 +23,19 @@ class BaxusAPI:
         Returns:
             Dictionary containing user's bottles and wishlist
         """
+        # Use sample data in development mode
+        if settings.DEBUG:
+            logger.info(f"Using sample data for user {username} in development mode")
+            return self._get_sample_user_bar()
+
         endpoint = f"{self.base_url}/bar/user/{username}"
         
         headers = {
             "Content-Type": "application/json",
         }
         
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-        
         try:
-            response = requests.get(endpoint, headers=headers, timeout=5)  # Add timeout
+            response = requests.get(endpoint, headers=headers, timeout=5)
             response.raise_for_status()
             
             data = response.json()
@@ -57,31 +58,38 @@ class BaxusAPI:
             
         except requests.exceptions.RequestException as e:
             logger.warning(f"Failed to fetch user bar data from BAXUS API: {str(e)}")
-            
-            # Always return a valid data structure, even when the API call fails
-            return {
-                'bottles': [],
-                'wishlist': []
-            }
+            return self._get_sample_user_bar()  # Fall back to sample data
     
     def _normalize_bottles(self, bottles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Ensure all bottles have required fields with default values"""
         normalized = []
         for bottle in bottles:
-            normalized_bottle = {
-                'bottle_id': bottle.get('bottle_id', ''),
-                'name': bottle.get('name', ''),
-                'brand': bottle.get('brand', ''),
-                'region': bottle.get('region', ''),
-                'style': bottle.get('style', ''),
-                'country': bottle.get('country', ''),
-                'price': float(bottle.get('price', 0.0)),
-                'age': int(bottle.get('age', 0)),
-                'abv': float(bottle.get('abv', 0.0)),
-                'rating': float(bottle.get('rating', 3.0)),
-                'flavor_profile': bottle.get('flavor_profile', {})
-            }
-            normalized.append(normalized_bottle)
+            try:
+                normalized_bottle = {
+                    'bottle_id': bottle.get('bottle_id', ''),
+                    'name': bottle.get('name', ''),
+                    'brand': bottle.get('brand', ''),
+                    'region': bottle.get('region', ''),
+                    'style': bottle.get('style', ''),
+                    'country': bottle.get('country', ''),
+                    'price': float(bottle.get('price', 0.0)),
+                    'age': int(bottle.get('age', 0)) if bottle.get('age') else 0,
+                    'abv': float(bottle.get('abv', 0.0)),
+                    'rating': float(bottle.get('rating', 3.0)),  # Default rating of 3.0
+                    'flavor_profile': bottle.get('flavor_profile', {})
+                }
+                
+                # Ensure all numeric fields are properly converted
+                normalized_bottle['price'] = float(normalized_bottle['price'])
+                normalized_bottle['age'] = int(normalized_bottle['age'])
+                normalized_bottle['abv'] = float(normalized_bottle['abv'])
+                normalized_bottle['rating'] = float(normalized_bottle['rating'])
+                
+                normalized.append(normalized_bottle)
+            except (ValueError, TypeError) as e:
+                logger.warning(f"Error normalizing bottle data: {str(e)}")
+                continue
+                
         return normalized
     
     def _get_sample_user_bar(self) -> Dict[str, List[Dict[str, Any]]]:

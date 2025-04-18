@@ -1,6 +1,10 @@
+import logging
+from django.conf import settings
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Any
+
+logger = logging.getLogger(__name__)
 
 class CollectionAnalyzer:
     """Analyzes a user's whisky collection to extract preferences"""
@@ -15,55 +19,52 @@ class CollectionAnalyzer:
         }
     
     def analyze_collection(self, bottles: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """
-        Analyzes the user's collection to extract preferences
-        
-        Args:
-            bottles: List of bottle data from the user's collection
-            
-        Returns:
-            Dictionary containing user preference profile
-        """
+        """Analyzes the user's collection to extract preferences"""
         if not bottles:
             return {
                 'regions': {},
                 'styles': {},
-                'price_range': {'min': 0, 'max': 0, 'avg': 0},
+                'price_range': {'min': 0.0, 'max': 0.0, 'avg': 0.0},
                 'age_preference': {'min': 0, 'max': 0, 'avg': 0},
                 'flavor_profile': {},
                 'top_characteristics': []
             }
         
-        df = pd.DataFrame(bottles)
-        
-        # Extract region preferences
-        region_counts = self._extract_region_preferences(df)
-        
-        # Extract style preferences
-        style_counts = self._extract_style_preferences(df)
-        
-        # Extract price range preferences
-        price_range = self._extract_price_range(df)
-        
-        # Extract age preferences
-        age_preference = self._extract_age_preference(df)
-        
-        # Extract flavor profile preferences
-        flavor_profile = self._extract_flavor_profile(df)
-        
-        # Identify top characteristics
-        top_characteristics = self._identify_top_characteristics(
-            region_counts, style_counts, flavor_profile
-        )
-        
-        return {
-            'regions': region_counts,
-            'styles': style_counts,
-            'price_range': price_range,
-            'age_preference': age_preference,
-            'flavor_profile': flavor_profile,
-            'top_characteristics': top_characteristics
-        }
+        try:
+            df = pd.DataFrame(bottles)
+            
+            # Extract preferences with error handling
+            region_counts = self._extract_region_preferences(df)
+            style_counts = self._extract_style_preferences(df)
+            price_range = self._extract_price_range(df)
+            age_preference = self._extract_age_preference(df)
+            flavor_profile = self._extract_flavor_profile(df)
+            
+            # Identify top characteristics
+            top_characteristics = self._identify_top_characteristics(
+                region_counts or {},
+                style_counts or {},
+                flavor_profile or {}
+            )
+            
+            return {
+                'regions': region_counts or {},
+                'styles': style_counts or {},
+                'price_range': price_range or {'min': 0.0, 'max': 0.0, 'avg': 0.0},
+                'age_preference': age_preference or {'min': 0, 'max': 0, 'avg': 0},
+                'flavor_profile': flavor_profile or {},
+                'top_characteristics': top_characteristics or []
+            }
+        except Exception as e:
+            logger.error(f"Error analyzing collection: {str(e)}")
+            return {
+                'regions': {},
+                'styles': {},
+                'price_range': {'min': 0.0, 'max': 0.0, 'avg': 0.0},
+                'age_preference': {'min': 0, 'max': 0, 'avg': 0},
+                'flavor_profile': {},
+                'top_characteristics': []
+            }
     
     def _extract_region_preferences(self, df: pd.DataFrame) -> Dict[str, float]:
         """Extract region preferences with normalized weights"""

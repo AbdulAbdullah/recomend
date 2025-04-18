@@ -1,5 +1,7 @@
 import os
 import json
+import logging
+from django.core.cache import cache
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Any
@@ -11,6 +13,7 @@ from .feature_processor import FeatureProcessor
 from data_integration.baxus_api import BaxusAPI
 from data_integration.data_processor import DataProcessor
 
+logger = logging.getLogger(__name__)
 
 class WhiskyRecommender:
     """Core recommendation engine for Bob"""
@@ -34,7 +37,24 @@ class WhiskyRecommender:
         with open(bottle_path, 'r') as f:
             bottles = json.load(f)
         
-        return pd.DataFrame(bottles)
+        df = pd.DataFrame(bottles)
+        
+        # Ensure required columns exist
+        required_columns = ['bottle_id', 'name', 'brand', 'region', 'style', 'price', 'age', 'abv', 'rating', 'flavor_profile']
+        for col in required_columns:
+            if col not in df.columns:
+                df[col] = None if col != 'flavor_profile' else {}
+        
+        # Convert numeric fields
+        df['price'] = pd.to_numeric(df['price'], errors='coerce').fillna(0.0)
+        df['age'] = pd.to_numeric(df['age'], errors='coerce').fillna(0)
+        df['abv'] = pd.to_numeric(df['abv'], errors='coerce').fillna(0.0)
+        df['rating'] = pd.to_numeric(df['rating'], errors='coerce').fillna(3.0)  # Default rating
+        
+        # Ensure flavor_profile is a dictionary
+        df['flavor_profile'] = df['flavor_profile'].apply(lambda x: x if isinstance(x, dict) else {})
+        
+        return df
     
     def get_recommendations(
         self, 
@@ -103,68 +123,70 @@ class WhiskyRecommender:
         count: int = 5
     ) -> List[Dict[str, Any]]:
         """Calculate similarity scores and select top recommendations"""
+        # Ensure both dataframes have the same columns
+        common_columns = [col for col in user_features_df.columns if col in candidate_features_df.columns]
+        user_features_df = user_features_df[common_columns]
+        candidate_features_df = candidate_features_df[common_columns]
+        
         # Feature columns to use for similarity calculation (exclude bottle_id)
-        feature_columns = [col for col in user_features_df.columns if col != 'bottle_id']
+        feature_columns = [col for col in common_columns if col != 'bottle_id']
+        
+        if not feature_columns:
+            raise ValueError("No common feature columns found for similarity calculation")
         
         # Calculate average user feature vector
         user_vector = user_features_df[feature_columns].mean(axis=0).values.reshape(1, -1)
         
-        # Ensure candidate features have the same columns
-        candidate_features = candidate_features_df[
-            [col for col in feature_columns if col in candidate_features_df.columns]
-        ].values
-        
-        # Fill in missing columns with zeros
-        if candidate_features.shape[1] < len(feature_columns):
-            padding = np.zeros((candidate_features.shape[0], 
-                               len(feature_columns) - candidate_features.shape[1]))
-            candidate_features = np.hstack((candidate_features, padding))
+        # Get candidate features
+        candidate_features = candidate_features_df[feature_columns].values
         
         # Calculate similarity scores
         similarity_scores = cosine_similarity(user_vector, candidate_features).flatten()
         
         # Apply price range filtering
-        # Apply price range filtering
-        price_range = user_preferences['price_range']
-        price_factor = 1.0
-        if price_range['avg'] > 0:
-            price_min = max(0, price_range['avg'] * 0.7)  # 30% below average
-            price_max = price_range['avg'] * 1.5  # 50% above average
-            
-            # Apply price factor to similarity scores
-            prices = candidate_features_df['price'].values if 'price' in candidate_features_df.columns else np.ones(len(candidate_features_df))
+        price_range = user_preferences.get('price_range', {})
+        if price_range and isinstance(price_range, dict) and price_range.get('avg', 0) > 0:
+            price_min = max(0, price_range['avg'] * 0.7)
+            price_max = price_range['avg'] * 1.5
+            prices = candidate_features_df['price'].values if 'price' in candidate_features_df else []
             for i, price in enumerate(prices):
                 if price < price_min or price > price_max:
-                    # Reduce similarity score for bottles outside price range
-                    similarity_scores[i] *= 0.7  # 30% penalty
+                    similarity_scores[i] *= 0.7
         
         # Get top recommendations
-        top_indices = similarity_scores.argsort()[-count*2:][::-1]  # Get more than needed for diversity
+        top_indices = similarity_scores.argsort()[-count*2:][::-1]
         
-        # Get bottle data for top recommendations
         recommendations = []
-        candidate_bottle_ids = candidate_features_df['bottle_id'].values
-        
         for i, idx in enumerate(top_indices):
             if i >= count:
                 break
                 
-            bottle_id = candidate_bottle_ids[idx]
-            bottle = self.bottles_df[self.bottles_df['bottle_id'] == bottle_id].iloc[0].to_dict()
-            
-            recommendations.append({
-                'bottle_id': bottle_id,
-                'name': bottle['name'],
-                'brand': bottle.get('brand', ''),
-                'region': bottle.get('region', ''),
-                'style': bottle.get('style', ''),
-                'price': float(bottle.get('price', 0)),
-                'age': int(bottle.get('age', 0)) if bottle.get('age') else None,
-                'score': float(similarity_scores[idx]),
-                'abv': float(bottle.get('abv', 0)) if bottle.get('abv') else None,
-                'flavor_profile': bottle.get('flavor_profile', {}),
-                'description': bottle.get('description', '')
-            })
+            try:
+                bottle_id = candidate_features_df.iloc[idx]['bottle_id']
+                bottle_data = self.bottles_df[self.bottles_df['bottle_id'] == bottle_id]
+                
+                if len(bottle_data) == 0:
+                    continue
+                    
+                bottle = bottle_data.iloc[0]
+                
+                recommendations.append({
+                    'bottle_id': str(bottle_id),
+                    'name': str(bottle['name']),
+                    'brand': str(bottle.get('brand', '')),
+                    'region': str(bottle.get('region', '')),
+                    'style': str(bottle.get('style', '')),
+                    'price': float(bottle.get('price', 0)),
+                    'age': int(bottle.get('age', 0)) if pd.notna(bottle.get('age')) else None,
+                    'score': float(similarity_scores[idx]),
+                    'abv': float(bottle.get('abv', 0)) if pd.notna(bottle.get('abv')) else None,
+                    'flavor_profile': bottle.get('flavor_profile', {}) or {},
+                    'description': str(bottle.get('description', '')),
+                    'reason': ''  # Initialize empty reason
+                })
+            except (KeyError, ValueError, TypeError) as e:
+                logger.warning(f"Error processing recommendation for index {idx}: {str(e)}")
+                continue
         
         return recommendations
     
@@ -244,20 +266,29 @@ class WhiskyRecommender:
     ) -> List[Dict[str, Any]]:
         """Provide default recommendations for new users with no collection"""
         # Select highly-rated, popular bottles across different regions and styles
+        if 'rating' not in self.bottles_df.columns:
+            self.bottles_df['rating'] = 3.0  # Default rating if missing
+            
+        recommendations = []
+        
+        # Get top rated bottles
         top_bottles = self.bottles_df.sort_values('rating', ascending=False).head(count*3)
         
         # Ensure diversity in recommendations
         regions = set()
         styles = set()
-        recommendations = []
         
         for _, bottle in top_bottles.iterrows():
             if len(recommendations) >= count:
                 break
                 
+            # Skip if missing required fields
+            if pd.isna(bottle.get('bottle_id')) or pd.isna(bottle.get('name')):
+                continue
+                
             # Skip if we already have a bottle from this region and style
-            region = bottle.get('region', '')
-            style = bottle.get('style', '')
+            region = str(bottle.get('region', ''))
+            style = str(bottle.get('style', ''))
             
             if (region in regions and style in styles) and len(recommendations) > count/2:
                 continue
@@ -265,32 +296,33 @@ class WhiskyRecommender:
             regions.add(region)
             styles.add(style)
             
-            bottle_dict = bottle.to_dict()
-            
             recommendations.append({
-                'bottle_id': bottle_dict['bottle_id'],
-                'name': bottle_dict['name'],
-                'brand': bottle_dict.get('brand', ''),
-                'region': bottle_dict.get('region', ''),
-                'style': bottle_dict.get('style', ''),
-                'price': float(bottle_dict.get('price', 0)),
-                'age': int(bottle_dict.get('age', 0)) if bottle_dict.get('age') else None,
+                'bottle_id': str(bottle['bottle_id']),  # Ensure string
+                'name': str(bottle['name']),
+                'brand': str(bottle.get('brand', '')),
+                'region': region,
+                'style': style,
+                'price': float(bottle.get('price', 0)),
+                'age': int(bottle.get('age', 0)) if pd.notna(bottle.get('age')) else None,
                 'score': 0.95,  # High default score for top bottles
-                'abv': float(bottle_dict.get('abv', 0)) if bottle_dict.get('abv') else None,
-                'flavor_profile': bottle_dict.get('flavor_profile', {}),
-                'description': bottle_dict.get('description', '')
+                'abv': float(bottle.get('abv', 0)) if pd.notna(bottle.get('abv')) else None,
+                'flavor_profile': bottle.get('flavor_profile', {}),
+                'description': str(bottle.get('description', ''))
             })
-        
+            
         # Add generic reasoning for new users
         if include_reasoning:
             for i, rec in enumerate(recommendations):
+                region = rec['region'] or 'quality'
+                style = rec['style'] or 'premium'
+                
                 if i == 0:
-                    rec['reason'] = f"A highly-rated {rec['region']} whisky perfect for starting your collection"
+                    rec['reason'] = f"A highly-rated {region} whisky perfect for starting your collection"
                 elif i == 1:
-                    rec['reason'] = f"An excellent {rec['style']} style that's widely appreciated by whisky enthusiasts"
+                    rec['reason'] = f"An excellent {style} style that's widely appreciated by whisky enthusiasts"
                 elif i == 2:
-                    rec['reason'] = f"A versatile {rec['region']} whisky that showcases classic characteristics"
+                    rec['reason'] = f"A versatile {region} whisky that showcases classic characteristics"
                 else:
-                    rec['reason'] = f"A distinguished bottle that represents the best of {rec['region']} whisky"
+                    rec['reason'] = f"A distinguished bottle that represents the best of {region} whisky"
         
         return recommendations

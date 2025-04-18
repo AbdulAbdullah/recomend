@@ -133,8 +133,8 @@ REST_FRAMEWORK = {
 CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:8000,http://127.0.0.1:8000').split(',')
 
 # BAXUS API Configuration
-BAXUS_API_BASE_URL = os.getenv('BAXUS_API_BASE_URL', 'http://services.baxus.co/api')
-BAXUS_API_KEY = os.getenv('BAXUS_API_KEY', '')
+BAXUS_API_BASE_URL = os.getenv('BAXUS_API_BASE_URL', 'https://services.baxus.co/api/bar/user/')
+
 
 # Recommendation Engine Settings
 BOTTLE_DATA_PATH = os.path.join(BASE_DIR, 'data', 'bottles.json')
