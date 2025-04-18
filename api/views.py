@@ -7,7 +7,8 @@ from .models import Bottle, UserRecommendation
 from .serializers import (
     BottleSerializer, 
     UserRecommendationSerializer,
-    RecommendationRequestSerializer
+    RecommendationRequestSerializer,
+    RecommendationResponseSerializer
 )
 
 from recommendation_engine.recommender import WhiskyRecommender
@@ -121,16 +122,28 @@ class RecommendationView(APIView):
                 include_reasoning=include_reasoning
             )
 
-            for rec in recommendations:
-                bottle = Bottle.objects.get(bottle_id=rec['bottle_id'])
-                UserRecommendation.objects.create(
-                    username=username,
-                    bottle=bottle,
-                    score=rec['score'],
-                    reason=rec.get('reason', '')
-                )
+            # Validate recommendations with the response serializer
+            response_serializer = RecommendationResponseSerializer(data=recommendations, many=True)
+            if response_serializer.is_valid():
+                # Create UserRecommendation records
+                for rec in recommendations:
+                    try:
+                        bottle = Bottle.objects.get(bottle_id=rec['bottle_id'])
+                        UserRecommendation.objects.create(
+                            username=username,
+                            bottle=bottle,
+                            score=rec['score'],
+                            reason=rec.get('reason', '')
+                        )
+                    except Bottle.DoesNotExist:
+                        continue
 
-            return Response(recommendations, status=status.HTTP_200_OK)
+                return Response(response_serializer.data, status=status.HTTP_200_OK)
+            else:
+                return Response(
+                    {"error": "Invalid recommendation format", "details": response_serializer.errors},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
 
         except Exception as e:
             return Response(

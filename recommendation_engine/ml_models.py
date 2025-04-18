@@ -186,43 +186,37 @@ class CollaborativeFilteringModel:
         
         return self
     
-    def get_recommendations(self, username: str, count: int = 5) -> List[str]:
+    def get_recommendations(
+        self, 
+        username: str, 
+        count: int = 5, 
+        include_reasoning: bool = True
+    ) -> List[Dict[str, Any]]:
         """
-        Get bottle recommendations for a user
+        Generate personalized bottle recommendations for a user
         
         Args:
-            username: Username to get recommendations for
+            username: BAXUS username
             count: Number of recommendations to return
+            include_reasoning: Whether to include reasoning for recommendations
             
         Returns:
-            List of recommended bottle IDs
+            List of recommended bottles with reasoning
         """
-        if username not in self.user_profiles:
-            # New user, return popular bottles
-            return self._get_popular_bottles(count)
+        try:
+            # Get user's bar data
+            user_bar = self.baxus_api.get_user_bar(username)
+            user_bottles = user_bar.get('bottles', [])
+
+            if not user_bottles:
+                return self._get_default_recommendations(username, count, include_reasoning)
+
+            # Rest of the existing recommendation logic...
             
-        user_bottles = set(self.user_profiles[username].keys())
-        
-        # Calculate recommendation scores for each bottle
-        recommendations = {}
-        
-        for bottle_id in self.bottle_vectors:
-            if bottle_id in user_bottles:
-                continue  # Skip bottles the user already has
-                
-            # Calculate recommendation score based on similar bottles
-            score = 0
-            for user_bottle_id in user_bottles:
-                if user_bottle_id in self.bottle_vectors:
-                    similarity = self._get_bottle_similarity(user_bottle_id, bottle_id)
-                    rating = self.user_profiles[username][user_bottle_id]
-                    score += similarity * rating
-                    
-            recommendations[bottle_id] = score
-            
-        # Sort by score and return top recommendations
-        sorted_recs = sorted(recommendations.items(), key=lambda x: x[1], reverse=True)
-        return [bottle_id for bottle_id, _ in sorted_recs[:count]]
+        except Exception as e:
+            # Log the error but continue with default recommendations
+            print(f"Error fetching user data: {str(e)}")
+            return self._get_default_recommendations(username, count, include_reasoning)
     
     def _calculate_bottle_similarities(self):
         """Calculate similarity matrix between all bottles"""

@@ -34,32 +34,55 @@ class BaxusAPI:
             headers["Authorization"] = f"Bearer {self.api_key}"
         
         try:
-            response = requests.get(endpoint, headers=headers)
+            response = requests.get(endpoint, headers=headers, timeout=5)  # Add timeout
             response.raise_for_status()
             
             data = response.json()
             
             # Handle case where response is a list
             if isinstance(data, list):
+                bottles = self._normalize_bottles(data)
                 return {
-                    'bottles': data,  # Assume the list contains bottles
-                    'wishlist': []    # Empty wishlist in this case
+                    'bottles': bottles,
+                    'wishlist': []
                 }
             
             # Handle case where response is a dictionary
+            bottles = self._normalize_bottles(data.get('bottles', []))
+            wishlist = self._normalize_bottles(data.get('wishlist', []))
             return {
-                'bottles': data.get('bottles', []),
-                'wishlist': data.get('wishlist', [])
+                'bottles': bottles,
+                'wishlist': wishlist
             }
             
         except requests.exceptions.RequestException as e:
-            logger.error(f"Error fetching user bar data: {str(e)}")
+            logger.warning(f"Failed to fetch user bar data from BAXUS API: {str(e)}")
             
-            # For development/testing, return sample data if API call fails
-            if settings.DEBUG:
-                return self._get_sample_user_bar()
-                
-            raise Exception(f"Failed to get user bar data: {str(e)}")
+            # Always return a valid data structure, even when the API call fails
+            return {
+                'bottles': [],
+                'wishlist': []
+            }
+    
+    def _normalize_bottles(self, bottles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Ensure all bottles have required fields with default values"""
+        normalized = []
+        for bottle in bottles:
+            normalized_bottle = {
+                'bottle_id': bottle.get('bottle_id', ''),
+                'name': bottle.get('name', ''),
+                'brand': bottle.get('brand', ''),
+                'region': bottle.get('region', ''),
+                'style': bottle.get('style', ''),
+                'country': bottle.get('country', ''),
+                'price': float(bottle.get('price', 0.0)),
+                'age': int(bottle.get('age', 0)),
+                'abv': float(bottle.get('abv', 0.0)),
+                'rating': float(bottle.get('rating', 3.0)),
+                'flavor_profile': bottle.get('flavor_profile', {})
+            }
+            normalized.append(normalized_bottle)
+        return normalized
     
     def _get_sample_user_bar(self) -> Dict[str, List[Dict[str, Any]]]:
         """Return sample user bar data for development/testing"""
