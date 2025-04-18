@@ -1,0 +1,24 @@
+[
+  {
+    "model": "api.userrecommendation",
+    "pk": 1,
+    "fields": {
+      "username": "carriebaxus",
+      "bottle": 12,
+      "score": 0.8,
+      "reason": "This bourbon offers excellent value with rich caramel and vanilla notes you tend to enjoy. It's an affordable daily option that doesn't compromise on quality. Heaven Hill's Heaven Hill Bottled In Bond 7 Year is crafted with attention to detail. It's extremely popular for good reason.",
+      "created_at": "2024-03-14T22:47:31.183Z"
+    }
+  },
+  {
+    "model": "api.userrecommendation",
+    "pk": 2,
+    "fields": {
+      "username": "carriebaxus",
+      "bottle": 440,
+      "score": 0.99,
+      "reason": "Based on your interest in craft spirits, this gin's unique botanicals will appeal to you. It's an affordable daily option that doesn't compromise on quality. Hendrick's's Hendrick's Gin is crafted with attention to detail. It's well-regarded in the community.",
+      "created_at": "2024-02-16T19:48:11.729Z"
+    }
+  }
+]
