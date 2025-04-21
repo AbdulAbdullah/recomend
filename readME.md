@@ -32,7 +32,7 @@ Bob analyzes your existing whisky collection to understand your preferences, the
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/bob-whisky-recommender.git
+   git clone https://github.com/AbdulAbdullah/recomend.git
    cd bob-whisky-recommender
    ```
 
